@@ -9,8 +9,12 @@ package Dist::Zilla::Plugin::Test::ReportPrereqs;
 use Dist::Zilla 4 ();
 
 use Moose;
-extends 'Dist::Zilla::Plugin::InlineFiles';
-with 'Dist::Zilla::Role::InstallTool', 'Dist::Zilla::Role::PrereqSource';
+with 'Dist::Zilla::Role::FileGatherer', 'Dist::Zilla::Role::PrereqSource';
+
+use Sub::Exporter::ForMethods;
+use Data::Section 0.200002 # encoding and bytes
+    { installer => Sub::Exporter::ForMethods::method_installer },
+    '-setup';
 
 use Data::Dumper;
 
@@ -47,27 +51,36 @@ sub register_prereqs {
     );
 }
 
+sub gather_files {
+    my $self = shift;
+
+    my $data = $self->merged_section_data;
+    return unless $data and %$data;
+
+    require Dist::Zilla::File::FromCode;
+
+    for my $filename (keys %$data) {
+        $self->add_file(Dist::Zilla::File::FromCode->new({
+            name => $filename,
+            code => sub {
+                $self->_munge_test(${ $data->{$filename} });
+            },
+        }));
+    }
+
+    return;
+}
+
 sub _munge_test {
-    my ( $self, $file ) = @_;
-    my $guts = $file->content;
+    my ( $self, $guts ) = @_;
     $guts =~ s{INSERT_VERSION_HERE}{$self->VERSION || '<self>'}e;
     $guts =~ s{INSERT_PREREQS_HERE}{$self->_dump_prereqs}e;
     $guts =~ s{INSERT_INCLUDED_MODULES_HERE}{_format_list($self->included_modules)}e;
     $guts =~ s{INSERT_EXCLUDED_MODULES_HERE}{_format_list($self->excluded_modules)}e;
     $guts =~ s{INSERT_VERIFY_PREREQS_CONFIG}{$self->verify_prereqs ? 1 : 0}e;
-    $file->content($guts);
+    return $guts;
 }
 
-sub setup_installer {
-    my ( $self, $opt ) = @_;
-    for my $file ( @{ $self->zilla->files } ) {
-        if ( 't/00-report-prereqs.t' eq $file->name ) {
-            return $self->_munge_test($file);
-        }
-    }
-    $self->log_fatal(
-        'Did not find t/00-report-prereqs.t in zilla files cache, inline files broken?');
-}
 
 sub _format_list {
     return join( "\n", map { "  $_" } @_ );
@@ -87,7 +100,7 @@ __PACKAGE__->meta->make_immutable;
 1;
 
 =for Pod::Coverage
-setup_installer
+gather_files
 mvp_multivalue_args
 register_prereqs
 
