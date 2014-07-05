@@ -57,16 +57,20 @@ sub gather_files {
     my $data = $self->merged_section_data;
     return unless $data and %$data;
 
-    require Dist::Zilla::File::FromCode;
+    require Dist::Zilla::File::InMemory;
 
     for my $filename (keys %$data) {
-        $self->add_file(Dist::Zilla::File::FromCode->new({
+        $self->add_file(Dist::Zilla::File::InMemory->new({
             name => $filename,
-            code => sub {
-                $self->_munge_test(${ $data->{$filename} });
-            },
+            content => $self->_munge_test(${ $data->{$filename} }),
         }));
     }
+
+    require Dist::Zilla::File::FromCode;
+    $self->add_file(Dist::Zilla::File::FromCode->new({
+        name => $self->_dump_filename,
+        code => sub { $self->_dump_prereqs },
+    }));
 
     return;
 }
@@ -74,13 +78,14 @@ sub gather_files {
 sub _munge_test {
     my ( $self, $guts ) = @_;
     $guts =~ s{INSERT_VERSION_HERE}{$self->VERSION || '<self>'}e;
-    $guts =~ s{INSERT_PREREQS_HERE}{$self->_dump_prereqs}e;
+    $guts =~ s{INSERT_DD_FILENAME_HERE}{$self->_dump_filename}e;
     $guts =~ s{INSERT_INCLUDED_MODULES_HERE}{_format_list($self->included_modules)}e;
     $guts =~ s{INSERT_EXCLUDED_MODULES_HERE}{_format_list($self->excluded_modules)}e;
     $guts =~ s{INSERT_VERIFY_PREREQS_CONFIG}{$self->verify_prereqs ? 1 : 0}e;
     return $guts;
 }
 
+sub _dump_filename { 't/00-report-prereqs.dd' }
 
 sub _format_list {
     return join( "\n", map { "  $_" } @_ );
@@ -113,7 +118,8 @@ register_prereqs
 
 =head1 DESCRIPTION
 
-This L<Dist::Zilla> plugin adds a F<t/00-report-prereqs.t> test file. It reports
+This L<Dist::Zilla> plugin adds a F<t/00-report-prereqs.t> test file and an accompanying
+F<t/00-report-prereqs.dd> data file. It reports
 the version of all modules listed in the distribution metadata prerequisites
 (including 'recommends', 'suggests', etc.).  However, any 'develop' prereqs
 are not reported (unless they show up in another category).
@@ -208,7 +214,7 @@ INSERT_EXCLUDED_MODULES_HERE
 );
 
 # Add static prereqs to the included modules list
-my $static_prereqs = INSERT_PREREQS_HERE;
+my $static_prereqs = do 'INSERT_DD_FILENAME_HERE';
 
 delete $static_prereqs->{develop} if not $ENV{AUTHOR_TESTING};
 $include{$_} = 1 for map { keys %$_ } map { values %$_ } values %$static_prereqs;
